@@ -96,3 +96,8 @@ Some interesting configuration settings:
   - This will result in lots of messages not being sent to the server because both types of messages are being generated at 2Hz and the messages are going out at 2Hz but the buffer can only hold 1 message at a time so one of the two messages must be dropped.
 - `cargo run -- -s --sensor-interval 200`
   - This will result in some messages not being sent to the server because every other "write" there will be 3 sensor data messages in addition to the 1 log message which will overflow the `buffer-size`.
+
+## Testing (or lack thereof)
+
+Because this was a super vague prompt designed to flush out some of the nuances/trades around the messaging system I decided to punt on testing beyond my own use for the sake of focusing on "features." 
+With the message prioritization, I would have liked to add in some tests around that functionality specifically to validate it was working as desired but I realized I should wrap up my work on this.
