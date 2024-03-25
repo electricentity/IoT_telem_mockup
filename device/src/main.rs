@@ -75,33 +75,28 @@ fn send_message(message: &Message) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let matches = App::new("device")
-        .version("0.1.0")
-        .arg(
-            Arg::with_name("file")
-                .short("f")
-                .long("file")
-                .takes_value(true)
-                .help("Path to the NDJSON file"),
-        )
-        .arg(
-            Arg::with_name("interval")
-                .short("i")
-                .long("interval")
-                .takes_value(true)
-                .help("Timing interval between messages (in seconds)"),
-        )
-        .get_matches();
+fn simulate_messages() -> Result<(), Box<dyn Error>> {
+    let simulated_message = Message {
+        timestamp: 1679539200,
+        device: "SimulatedDevice".to_string(),
+        firmware: "1.0-sim".to_string(),
+        message_type: MessageType::Log,
+        log_message: Some(LogMessage {
+            severity: Severity::Info,
+            message: "This is a simulated message.".to_string(),
+        }),
+        sensor_data: None,
+    };
 
-    let file_path = matches.value_of("file").expect("File path is required");
-    let interval = matches
-        .value_of("interval")
-        .unwrap_or("1")
-        .parse::<u64>()
-        .expect("Interval must be a number");
+    send_message(&simulated_message)?;
 
-    let path = Path::new(file_path);
+    println!("Simulated message sent successfully.");
+
+    Ok(())
+}
+
+fn send_messages_from_file(file_path: &str, interval: u64) -> Result<(), Box<dyn Error>> {
+    let path = Path::new(&file_path);
     let file = File::open(path)?;
     let reader = BufReader::new(file);
 
@@ -116,4 +111,46 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let matches = App::new("device")
+        .version("0.1.0")
+        .arg(
+            Arg::with_name("file")
+                .short("f")
+                .long("file")
+                .takes_value(true)
+                .conflicts_with("simulate")
+                .help("Path to the NDJSON file"),
+        )
+        .arg(
+            Arg::with_name("simulate")
+                .short("s")
+                .long("simulate")
+                .takes_value(false)
+                .help("Simulate message generation and sending"),
+        )
+        .arg(
+            Arg::with_name("interval")
+                .short("i")
+                .long("interval")
+                .takes_value(true)
+                .requires("file")
+                .help("Timing interval between messages (in seconds)"),
+        )
+        .get_matches();
+
+    if matches.is_present("file") {
+        let file_path = matches.value_of("file").expect("File path is required");
+        let interval = matches
+            .value_of("interval")
+            .unwrap_or("1")
+            .parse::<u64>()
+            .expect("Interval must be a number");
+
+        send_messages_from_file(file_path, interval)
+    } else {
+        simulate_messages()
+    }
 }
