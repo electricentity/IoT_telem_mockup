@@ -1,0 +1,6 @@
+{"timestamp": 1679539200, "device": "DeviceA", "firmware": "1.0", "message_type": "log", "log_message": {"severity": "Info", "message": "System boot complete."}}
+{"timestamp": 1679542800, "device": "DeviceA", "firmware": "1.0", "message_type": "sensorData", "sensor_data": [{"name": "Temperature", "value": 23.4}, {"name": "Humidity", "value": 60.2}]}
+{"timestamp": 1679546400, "device": "DeviceA", "firmware": "1.0", "message_type": "log", "log_message": {"severity": "Warning", "message": "Low disk space."}}
+{"timestamp": 1679550000, "device": "DeviceA", "firmware": "1.0", "message_type": "sensorData", "sensor_data": [{"name": "Pressure", "value": 1.02}, {"name": "Temperature", "value": -4.5}]}
+{"timestamp": 1679553600, "device": "DeviceA", "firmware": "1.0", "message_type": "log", "log_message": {"severity": "Debug", "message": "Debug mode enabled."}}
+{"timestamp": 1679557200, "device": "DeviceA", "firmware": "1.0", "message_type": "sensorData", "sensor_data": [{"name": "Vibration", "value": 0.02}, {"name": "Temperature", "value": 22.5}, {"name": "Humidity", "value": 45.2}]}
