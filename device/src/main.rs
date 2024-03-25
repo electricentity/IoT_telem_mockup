@@ -3,6 +3,7 @@ use clap::{App, Arg};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::error::Error;
 use std::{
     fs::File,
@@ -14,7 +15,7 @@ use tokio::sync::mpsc;
 use tokio::time::{self, Duration};
 use uuid::Uuid;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
 enum Severity {
     Debug,
     Info,
@@ -55,25 +56,92 @@ struct Message {
     sensor_data: Option<Vec<SensorData>>,
 }
 
-async fn send_message(message: &Message, port: u16) -> Result<(), Box<dyn Error>> {
+async fn send_messages(
+    mut messages: Vec<Message>,
+    port: u16,
+    buffer_size: u64,
+) -> Result<(), Box<dyn Error>> {
     let agent = ureq::Agent::new();
-    match agent
-        .post(&format!("http://localhost:{}", port))
-        .set("Content-Type", "application/json")
-        .send_json(serde_json::to_value(message)?)
-    {
-        Ok(_) => {
-            println!("Message sent successfully");
+    messages.sort_by(|a, b| {
+        match (&a.message_type, &b.message_type) {
+            // Prioritize Log messages with Severity::Error
+            (MessageType::Log, MessageType::Log) => {
+                if a.log_message
+                    .as_ref()
+                    .map_or(false, |log| log.severity == Severity::Error)
+                    && b.log_message
+                        .as_ref()
+                        .map_or(false, |log| log.severity != Severity::Error)
+                {
+                    std::cmp::Ordering::Less
+                } else if a
+                    .log_message
+                    .as_ref()
+                    .map_or(false, |log| log.severity != Severity::Error)
+                    && b.log_message
+                        .as_ref()
+                        .map_or(false, |log| log.severity == Severity::Error)
+                {
+                    std::cmp::Ordering::Greater
+                } else {
+                    // If both are errors or both are not errors, consider them equal in this layer
+                    std::cmp::Ordering::Equal
+                }
+            }
+            // SensorData comes after Log messages with Severity::Error but before other logs
+            (MessageType::Log, MessageType::SensorData) => {
+                if a.log_message
+                    .as_ref()
+                    .map_or(false, |log| log.severity == Severity::Error)
+                {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Greater
+                }
+            }
+            (MessageType::SensorData, MessageType::Log) => {
+                if b.log_message
+                    .as_ref()
+                    .map_or(false, |log| log.severity == Severity::Error)
+                {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Less
+                }
+            }
+            // SensorData messages are considered equal among themselves
+            (MessageType::SensorData, MessageType::SensorData) => std::cmp::Ordering::Equal,
+            _ => std::cmp::Ordering::Equal,
         }
-        Err(ureq::Error::Status(code, response)) => {
-            eprintln!(
-                "Failed to send message. Code: {}, Status: {}",
-                code,
-                response.status()
-            );
-        }
-        Err(e) => {
-            eprintln!("Failed to send message without getting a response: {:?}", e);
+    });
+
+    // Trim to down the the buffer size number of messages
+    let total_messages = messages.len();
+    if total_messages > buffer_size as usize {
+        let messages_to_drop = total_messages - buffer_size as usize;
+        println!("Dropping {} messages", messages_to_drop);
+        messages.truncate(buffer_size as usize);
+    }
+
+    for message in messages.into_iter() {
+        match agent
+            .post(&format!("http://localhost:{}", port))
+            .set("Content-Type", "application/json")
+            .send_json(serde_json::to_value(message)?)
+        {
+            Ok(_) => {
+                println!("Message sent successfully");
+            }
+            Err(ureq::Error::Status(code, response)) => {
+                eprintln!(
+                    "Failed to send message. Code: {}, Status: {}",
+                    code,
+                    response.status()
+                );
+            }
+            Err(e) => {
+                eprintln!("Failed to send message without getting a response: {:?}", e);
+            }
         }
     }
 
@@ -92,7 +160,10 @@ async fn simulate_messages(
     let send_interval: Duration = Duration::from_millis(write_interval_ms);
 
     println!("Creating device");
-    let (tx, mut rx) = mpsc::channel(buffer_size as usize);
+    // make the channel be larger than the buffer size so we can filter
+    // messages in send_messages and pretend we are putting the messages into
+    // different quees based on priority
+    let (tx, mut rx) = mpsc::channel(2 * buffer_size as usize);
     let device_id = Uuid::new_v4().to_string();
 
     // Log Message Producer Task
@@ -150,10 +221,23 @@ async fn simulate_messages(
 
     // Central Message Sending Task
     tokio::spawn(async move {
+        let mut buffer = VecDeque::new();
         loop {
+            // Ensure we have at least one message to send
             if let Some(message) = rx.recv().await {
-                // Send the message
-                send_message(&message, port).await.unwrap();
+                buffer.push_back(message);
+                // Drain all available messages from the channel
+                while let Ok(message) = rx.try_recv() {
+                    buffer.push_back(message);
+                }
+                // Call send_messages with all collected messages
+                if let Err(e) = send_messages(buffer.drain(..).collect(), port, buffer_size).await {
+                    eprintln!("Failed to send messages: {:?}", e);
+                    break;
+                }
+            } else {
+                // Channel is closed
+                break;
             }
             time::sleep(send_interval).await;
         }
