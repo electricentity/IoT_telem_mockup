@@ -1,3 +1,4 @@
+use chrono::{Utc, SecondsFormat};
 use clap::{App, Arg};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -39,7 +40,7 @@ struct SensorData {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Message {
-    timestamp: i64,
+    timestamp: String,
     device: String,
     firmware: String,
     message_type: MessageType,
@@ -78,13 +79,8 @@ fn send_message(message: &Message) -> Result<(), Box<dyn Error>> {
 
 fn simulate_messages() -> Result<(), Box<dyn Error>> {
     loop {
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_secs();
-
         let simulated_message = Message {
-            timestamp: now as i64,
+            timestamp: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
             device: "SimulatedDevice".to_string(),
             firmware: "1.0-sim".to_string(),
             message_type: MessageType::Log,
