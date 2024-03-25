@@ -1,6 +1,7 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 from datetime import datetime
+import argparse
 
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
 
@@ -33,4 +34,8 @@ def run(server_class=HTTPServer, handler_class=SimpleHTTPRequestHandler, port=80
     httpd.serve_forever()
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser(description="Simple HTTP Server")
+    parser.add_argument('--port', type=int, default=8080, help='Specify the port number on which the server listens')
+    args = parser.parse_args()
+
+    run(port=args.port)
