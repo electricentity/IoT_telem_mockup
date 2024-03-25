@@ -111,7 +111,6 @@ async fn send_messages(
             }
             // SensorData messages are considered equal among themselves
             (MessageType::SensorData, MessageType::SensorData) => std::cmp::Ordering::Equal,
-            _ => std::cmp::Ordering::Equal,
         }
     });
 
