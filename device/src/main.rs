@@ -55,7 +55,6 @@ struct Message {
     sensor_data: Option<Vec<SensorData>>,
 }
 
-
 async fn send_message(message: &Message, port: u16) -> Result<(), Box<dyn Error>> {
     let agent = ureq::Agent::new();
     match agent
@@ -81,14 +80,19 @@ async fn send_message(message: &Message, port: u16) -> Result<(), Box<dyn Error>
     Ok(())
 }
 
-async fn simulate_messages(port: u16, log_interval_ms: u64, sensor_interval_ms: u64, write_interval_ms: u64) {
-
+async fn simulate_messages(
+    port: u16,
+    log_interval_ms: u64,
+    sensor_interval_ms: u64,
+    write_interval_ms: u64,
+    buffer_size: u64,
+) {
     let log_message_interval: Duration = Duration::from_millis(log_interval_ms);
     let sensor_data_interval: Duration = Duration::from_millis(sensor_interval_ms);
     let send_interval: Duration = Duration::from_millis(write_interval_ms);
 
     println!("Creating device");
-    let (tx, mut rx) = mpsc::channel();
+    let (tx, mut rx) = mpsc::channel(buffer_size as usize);
     let device_id = Uuid::new_v4().to_string();
 
     // Log Message Producer Task
@@ -116,9 +120,8 @@ async fn simulate_messages(port: u16, log_interval_ms: u64, sensor_interval_ms: 
                 sensor_data: None,
             };
             // Send the log message
-            if let Err(e) = tx_clone.send(log_msg).await {
-                eprintln!("Failed to send log message: {:?}", e);
-                break;
+            if let Err(e) = tx_clone.try_send(log_msg) {
+                eprintln!("Failed to put log message into buffer: {:?}", e);
             }
             time::sleep(log_message_interval).await;
         }
@@ -206,6 +209,18 @@ fn send_messages_from_file(
     Ok(())
 }
 
+fn positive_integer_validator(val: String) -> Result<(), String> {
+    val.parse::<i64>()
+        .map_err(|_| "The value must be an integer.".to_string())
+        .and_then(|v| {
+            if v > 0 {
+                Ok(())
+            } else {
+                Err("The value must be greater than 0.".to_string())
+            }
+        })
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let matches = App::new("device")
@@ -239,61 +254,48 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .takes_value(true)
                 .requires("simulate")
                 .help("Time between log messages for a single device in ms (default: 500)")
-                .validator(|val| {
-                    val.parse::<u64>()
-                        .map_err(|_| "The value must be an integer.".to_string())
-                        .and_then(|v| if v > 0 { Ok(()) } else { Err("The value must be greater than 0.".to_string()) })
-                }))
+                .validator(positive_integer_validator),
+        )
         .arg(
             Arg::with_name("sensor-interval")
                 .long("sensor-interval")
                 .takes_value(true)
                 .requires("simulate")
                 .help("Time between sensor messages for a single device in ms (default: 500)")
-                .validator(|val| {
-                    val.parse::<u64>()
-                        .map_err(|_| "The value must be an integer.".to_string())
-                        .and_then(|v| if v > 0 { Ok(()) } else { Err("The value must be greater than 0.".to_string()) })
-                }))
+                .validator(positive_integer_validator),
+        )
         .arg(
             Arg::with_name("write-interval")
                 .long("write-interval")
                 .takes_value(true)
                 .requires("simulate")
                 .help("Time between sending messages for a single device in ms (default: 500)")
-                .validator(|val| {
-                    val.parse::<u64>()
-                        .map_err(|_| "The value must be an integer.".to_string())
-                        .and_then(|v| if v > 0 { Ok(()) } else { Err("The value must be greater than 0.".to_string()) })
-                }))
+                .validator(positive_integer_validator),
+        )
+        .arg(
+            Arg::with_name("buffer-size")
+                .long("buffer-size")
+                .takes_value(true)
+                .requires("simulate")
+                .help("Number of messages a device can hold at a time (default: 3)")
+                .validator(positive_integer_validator),
+        )
+        .arg(
             Arg::with_name("number")
                 .short("n")
                 .long("number")
                 .takes_value(true)
                 .requires("simulate")
                 .help("Number of devices to simulate (default: 3)")
-                .validator(|val| {
-                    val.parse::<u64>()
-                        .map_err(|_| "The value must be an integer.".to_string())
-                        .and_then(|v| if v > 0 { Ok(()) } else { Err("The value must be greater than 0.".to_string()) })
-                }))
-
+                .validator(positive_integer_validator),
+        )
         .arg(
             Arg::with_name("port")
                 .short("p")
                 .long("port")
                 .takes_value(true)
                 .help("The port to try to hit at http://localhost:<PORT> (default: 8080)")
-                .validator(|v| match v.parse::<u16>() {
-                    Ok(port) => {
-                        if port > 0 {
-                            Ok(())
-                        } else {
-                            Err("Port number must be greater than 0.".to_string())
-                        }
-                    }
-                    Err(_) => Err("Port number must be a valid integer.".to_string()),
-                }),
+                .validator(positive_integer_validator),
         )
         .get_matches();
 
@@ -314,6 +316,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .unwrap_or("3")
             .parse::<u64>()
             .expect("Number of devices must be an integer > 0");
+
+        let buffer_size = matches
+            .value_of("buffer-size")
+            .unwrap_or("3")
+            .parse::<u64>()
+            .expect("Buffer size must be an integer > 0");
+
         let log_interval = matches
             .value_of("log-interval")
             .unwrap_or("500")
@@ -336,7 +345,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         for _ in 0..device_count {
             simulations.push(tokio::spawn(async move {
-                simulate_messages(port, log_interval, sensor_interval, write_interval).await;
+                simulate_messages(
+                    port,
+                    log_interval,
+                    sensor_interval,
+                    write_interval,
+                    buffer_size,
+                )
+                .await;
             }));
             // Space things out for the initialization
             thread::sleep(Duration::from_millis(20));
