@@ -55,9 +55,6 @@ struct Message {
     sensor_data: Option<Vec<SensorData>>,
 }
 
-const LOG_MESSAGE_INTERVAL: Duration = Duration::from_millis(500000);
-const SENSOR_DATA_INTERVAL: Duration = Duration::from_millis(500);
-const SEND_INTERVAL: Duration = Duration::from_millis(3000);
 
 async fn send_message(message: &Message, port: u16) -> Result<(), Box<dyn Error>> {
     let agent = ureq::Agent::new();
@@ -84,9 +81,14 @@ async fn send_message(message: &Message, port: u16) -> Result<(), Box<dyn Error>
     Ok(())
 }
 
-async fn simulate_messages(port: u16) {
+async fn simulate_messages(port: u16, log_interval_ms: u64, sensor_interval_ms: u64, write_interval_ms: u64) {
+
+    let log_message_interval: Duration = Duration::from_millis(log_interval_ms);
+    let sensor_data_interval: Duration = Duration::from_millis(sensor_interval_ms);
+    let send_interval: Duration = Duration::from_millis(write_interval_ms);
+
     println!("Creating device");
-    let (tx, mut rx) = mpsc::channel(3);
+    let (tx, mut rx) = mpsc::channel();
     let device_id = Uuid::new_v4().to_string();
 
     // Log Message Producer Task
@@ -118,7 +120,7 @@ async fn simulate_messages(port: u16) {
                 eprintln!("Failed to send log message: {:?}", e);
                 break;
             }
-            time::sleep(LOG_MESSAGE_INTERVAL).await;
+            time::sleep(log_message_interval).await;
         }
     });
 
@@ -139,7 +141,7 @@ async fn simulate_messages(port: u16) {
             };
 
             tx.send(sensor_msg).await.unwrap();
-            time::sleep(SENSOR_DATA_INTERVAL).await;
+            time::sleep(sensor_data_interval).await;
         }
     });
 
@@ -150,7 +152,7 @@ async fn simulate_messages(port: u16) {
                 // Send the message
                 send_message(&message, port).await.unwrap();
             }
-            time::sleep(SEND_INTERVAL).await;
+            time::sleep(send_interval).await;
         }
     })
     .await
@@ -232,13 +234,50 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .help("Simulate message generation and sending"),
         )
         .arg(
+            Arg::with_name("log-interval")
+                .long("log-interval")
+                .takes_value(true)
+                .requires("simulate")
+                .help("Time between log messages for a single device in ms (default: 500)")
+                .validator(|val| {
+                    val.parse::<u64>()
+                        .map_err(|_| "The value must be an integer.".to_string())
+                        .and_then(|v| if v > 0 { Ok(()) } else { Err("The value must be greater than 0.".to_string()) })
+                }))
+        .arg(
+            Arg::with_name("sensor-interval")
+                .long("sensor-interval")
+                .takes_value(true)
+                .requires("simulate")
+                .help("Time between sensor messages for a single device in ms (default: 500)")
+                .validator(|val| {
+                    val.parse::<u64>()
+                        .map_err(|_| "The value must be an integer.".to_string())
+                        .and_then(|v| if v > 0 { Ok(()) } else { Err("The value must be greater than 0.".to_string()) })
+                }))
+        .arg(
+            Arg::with_name("write-interval")
+                .long("write-interval")
+                .takes_value(true)
+                .requires("simulate")
+                .help("Time between sending messages for a single device in ms (default: 500)")
+                .validator(|val| {
+                    val.parse::<u64>()
+                        .map_err(|_| "The value must be an integer.".to_string())
+                        .and_then(|v| if v > 0 { Ok(()) } else { Err("The value must be greater than 0.".to_string()) })
+                }))
             Arg::with_name("number")
                 .short("n")
                 .long("number")
                 .takes_value(true)
                 .requires("simulate")
-                .help("Number of devices to simulate (default: 3)"),
-        )
+                .help("Number of devices to simulate (default: 3)")
+                .validator(|val| {
+                    val.parse::<u64>()
+                        .map_err(|_| "The value must be an integer.".to_string())
+                        .and_then(|v| if v > 0 { Ok(()) } else { Err("The value must be greater than 0.".to_string()) })
+                }))
+
         .arg(
             Arg::with_name("port")
                 .short("p")
@@ -275,11 +314,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .unwrap_or("3")
             .parse::<u64>()
             .expect("Number of devices must be an integer > 0");
+        let log_interval = matches
+            .value_of("log-interval")
+            .unwrap_or("500")
+            .parse::<u64>()
+            .expect("Log interval must be an integer >= 0");
+
+        let sensor_interval = matches
+            .value_of("sensor-interval")
+            .unwrap_or("500")
+            .parse::<u64>()
+            .expect("Sensor interval must be an integer >= 0");
+
+        let write_interval = matches
+            .value_of("write-interval")
+            .unwrap_or("500")
+            .parse::<u64>()
+            .expect("Write interval must be an integer >= 0");
+
         let mut simulations = Vec::new();
 
         for _ in 0..device_count {
             simulations.push(tokio::spawn(async move {
-                simulate_messages(port).await;
+                simulate_messages(port, log_interval, sensor_interval, write_interval).await;
             }));
             // Space things out for the initialization
             thread::sleep(Duration::from_millis(20));
