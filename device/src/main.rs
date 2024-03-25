@@ -7,6 +7,7 @@ use std::{
     path::Path,
     thread,
     time::Duration,
+    time::SystemTime,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -76,23 +77,30 @@ fn send_message(message: &Message) -> Result<(), Box<dyn Error>> {
 }
 
 fn simulate_messages() -> Result<(), Box<dyn Error>> {
-    let simulated_message = Message {
-        timestamp: 1679539200,
-        device: "SimulatedDevice".to_string(),
-        firmware: "1.0-sim".to_string(),
-        message_type: MessageType::Log,
-        log_message: Some(LogMessage {
-            severity: Severity::Info,
-            message: "This is a simulated message.".to_string(),
-        }),
-        sensor_data: None,
-    };
+    loop {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs();
 
-    send_message(&simulated_message)?;
+        let simulated_message = Message {
+            timestamp: now as i64,
+            device: "SimulatedDevice".to_string(),
+            firmware: "1.0-sim".to_string(),
+            message_type: MessageType::Log,
+            log_message: Some(LogMessage {
+                severity: Severity::Info,
+                message: "This is a simulated message.".to_string(),
+            }),
+            sensor_data: None,
+        };
 
-    println!("Simulated message sent successfully.");
+        println!("Created simulated message.");
 
-    Ok(())
+        send_message(&simulated_message)?;
+
+        thread::sleep(Duration::from_secs(1));
+    }
 }
 
 fn send_messages_from_file(file_path: &str, interval: u64) -> Result<(), Box<dyn Error>> {
